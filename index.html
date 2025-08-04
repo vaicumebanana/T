@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>viLorLM - Transcrição de Vídeo/Áudio</title>
+    <!-- CDNs para processamento -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/recordrtc@latest"></script>
+    <!-- FFmpeg para extrair áudio de vídeos -->
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+    <!-- UI Framework -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --main-purple: #7B2CBF;
+            --main-pink: #E83F6F;
+        }
+        body {
+            background: #f8f9fa;
+            min-height: 100vh;
+        }
+        .vilorlm-container {
+            max-width: 900px;
+            margin: 2rem auto;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(123, 44, 191, 0.2);
+            overflow: hidden;
+        }
+        .vilorlm-header {
+            background: linear-gradient(135deg, var(--main-purple), var(--main-pink));
+            color: white;
+            padding: 1.5rem;
+            text-align: center;
+        }
+        .transcription-panel {
+            padding: 1.5rem;
+            background: white;
+        }
+        .btn-vilorlm {
+            background: linear-gradient(135deg, var(--main-purple), var(--main-pink));
+            color: white;
+            border: none;
+            padding: 10px 25px;
+            border-radius: 50px;
+            font-weight: 600;
+        }
+        .progress-bar {
+            background: linear-gradient(135deg, var(--main-purple), var(--main-pink));
+        }
+        .file-upload-box {
+            border: 2px dashed #ddd;
+            border-radius: 15px;
+            padding: 2rem;
+            text-align: center;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .file-upload-box:hover {
+            border-color: var(--main-purple);
+            background: rgba(123, 44, 191, 0.05);
+        }
+        #transcriptionResult {
+            min-height: 200px;
+            border: 1px solid #eee;
+            border-radius: 10px;
+            padding: 1rem;
+            background: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="vilorlm-container">
+        <div class="vilorlm-header">
+            <h2>viLorLM</h2>
+            <p class="mb-0">Transcrição de Vídeo/Áudio em ≤5 Minutos</p>
+        </div>
+        
+        <div class="transcription-panel">
+            <div class="file-upload-box" id="fileUploadBox">
+                <i class="bi bi-cloud-arrow-up" style="font-size: 2rem; color: var(--main-purple);"></i>
+                <p class="mt-2">Arraste e solte arquivos de vídeo/áudio aqui</p>
+                <small class="text-muted">Formatos suportados: MP3, MP4, WAV, AVI (até 6 horas)</small>
+                <input type="file" id="fileInput" accept="audio/*,video/*" hidden>
+            </div>
+            
+            <div class="d-flex gap-2 mb-3">
+                <button id="recordBtn" class="btn btn-vilorlm flex-grow-1">
+                    <i class="bi bi-mic-fill"></i> Gravar Áudio
+                </button>
+                <button id="stopBtn" class="btn btn-outline-secondary" disabled>
+                    <i class="bi bi-stop-fill"></i> Parar
+                </button>
+            </div>
+            
+            <div class="mb-3">
+                <div class="d-flex justify-content-between mb-1">
+                    <small>Progresso:</small>
+                    <small id="progressText">0%</small>
+                </div>
+                <div class="progress" style="height: 8px;">
+                    <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+                </div>
+            </div>
+            
+            <div id="transcriptionResult" class="mb-3">
+                <p class="text-muted text-center my-4">A transcrição aparecerá aqui...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===== viLorLM - Transcrição Client-Side =====
+        class viLorLM {
+            constructor() {
+                this.recorder = null;
+                this.audioChunks = [];
+                this.ffmpeg = null;
+                this.isProcessing = false;
+                
+                this.initElements();
+                this.initEventListeners();
+                this.loadFFmpeg();
+            }
+            
+            initElements() {
+                this.elements = {
+                    fileInput: document.getElementById('fileInput'),
+                    fileUploadBox: document.getElementById('fileUploadBox'),
+                    recordBtn: document.getElementById('recordBtn'),
+                    stopBtn: document.getElementById('stopBtn'),
+                    progressText: document.getElementById('progressText'),
+                    progressBar: document.getElementById('progressBar'),
+                    transcriptionResult: document.getElementById('transcriptionResult')
+                };
+            }
+            
+            initEventListeners() {
+                this.elements.fileUploadBox.addEventListener('click', () => this.elements.fileInput.click());
+                this.elements.fileInput.addEventListener('change', (e) => this.processFile(e.target.files[0]));
+                this.elements.recordBtn.addEventListener('click', () => this.startRecording());
+                this.elements.stopBtn.addEventListener('click', () => this.stopRecording());
+                
+                // Drag and drop
+                this.elements.fileUploadBox.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    this.elements.fileUploadBox.style.borderColor = 'var(--main-purple)';
+                    this.elements.fileUploadBox.style.backgroundColor = 'rgba(123, 44, 191, 0.1)';
+                });
+                
+                this.elements.fileUploadBox.addEventListener('dragleave', () => {
+                    this.elements.fileUploadBox.style.borderColor = '#ddd';
+                    this.elements.fileUploadBox.style.backgroundColor = '';
+                });
+                
+                this.elements.fileUploadBox.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    this.elements.fileUploadBox.style.borderColor = '#ddd';
+                    this.elements.fileUploadBox.style.backgroundColor = '';
+                    if (e.dataTransfer.files.length) {
+                        this.processFile(e.dataTransfer.files[0]);
+                    }
+                });
+            }
+            
+            async loadFFmpeg() {
+                try {
+                    this.updateUI("Carregando FFmpeg...", 10);
+                    const { createFFmpeg } = FFmpeg;
+                    this.ffmpeg = createFFmpeg({ log: true });
+                    await this.ffmpeg.load();
+                    this.updateUI("FFmpeg carregado!", 20);
+                } catch (error) {
+                    console.error("Erro ao carregar FFmpeg:", error);
+                    this.updateUI("Erro ao carregar FFmpeg", 0, true);
+                }
+            }
+            
+            async startRecording() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    this.recorder = new RecordRTC(stream, {
+                        type: 'audio',
+                        mimeType: 'audio/wav',
+                        recorderType: RecordRTC.StereoAudioRecorder,
+                        desiredSampRate: 16000,
+                        timeSlice: 1000, // Processa em pedaços de 1 segundo
+                        ondataavailable: (blob) => this.processAudioChunk(blob)
+                    });
+                    
+                    this.recorder.startRecording();
+                    this.elements.recordBtn.disabled = true;
+                    this.elements.stopBtn.disabled = false;
+                    
+                    this.updateUI("Gravando... fale agora", 30);
+                } catch (error) {
+                    console.error("Erro ao iniciar gravação:", error);
+                    this.updateUI("Erro ao acessar microfone", 0, true);
+                }
+            }
+            
+            async stopRecording() {
+                if (!this.recorder) return;
+                
+                this.recorder.stopRecording(() => {
+                    const blob = this.recorder.getBlob();
+                    this.processAudio(blob, "Áudio gravado");
+                    
+                    this.elements.recordBtn.disabled = false;
+                    this.elements.stopBtn.disabled = true;
+                });
+            }
+            
+            async processFile(file) {
+                if (!file) return;
+                
+                this.updateUI(`Processando ${file.name}...`, 20);
+                
+                if (file.type.startsWith('audio/')) {
+                    this.processAudio(file, file.name);
+                } 
+                else if (file.type.startsWith('video/')) {
+                    this.processVideo(file);
+                } 
+                else {
+                    this.updateUI("Formato não suportado", 0, true);
+                }
+            }
+            
+            async processVideo(videoFile) {
+                try {
+                    if (!this.ffmpeg) {
+                        throw new Error("FFmpeg não carregado");
+                    }
+                    
+                    this.updateUI("Extraindo áudio do vídeo...", 40);
+                    
+                    // Converte vídeo para áudio usando FFmpeg
+                    const data = await this.readFileAsArrayBuffer(videoFile);
+                    this.ffmpeg.FS('writeFile', 'input.mp4', new Uint8Array(data));
+                    
+                    await this.ffmpeg.run(
+                        '-i', 'input.mp4',
+                        '-vn',          // Remove vídeo
+                        '-acodec', 'pcm_s16le', // Codec de áudio
+                        '-ar', '16000', // Taxa de amostragem
+                        '-ac', '1',     // Mono
+                        'output.wav'
+                    );
+                    
+                    const audioData = this.ffmpeg.FS('readFile', 'output.wav');
+                    const audioBlob = new Blob([audioData.buffer], { type: 'audio/wav' });
+                    
+                    this.processAudio(audioBlob, videoFile.name);
+                } catch (error) {
+                    console.error("Erro no processamento de vídeo:", error);
+                    this.updateUI("Falha ao extrair áudio do vídeo", 0, true);
+                }
+            }
+            
+            async processAudio(audioBlob, sourceName) {
+                try {
+                    this.isProcessing = true;
+                    this.updateUI(`Transcrevendo ${sourceName}...`, 60);
+                    
+                    if (!('webkitSpeechRecognition' in window)) {
+                        throw new Error("API de reconhecimento não suportada no seu navegador");
+                    }
+                    
+                    const recognition = new webkitSpeechRecognition();
+                    recognition.continuous = true;
+                    recognition.interimResults = true;
+                    recognition.lang = 'pt-BR';
+                    
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
+                    
+                    let fullTranscript = "";
+                    
+                    recognition.onresult = (event) => {
+                        let interimTranscript = '';
+                        for (let i = event.resultIndex; i < event.results.length; i++) {
+                            const transcript = event.results[i][0].transcript;
+                            if (event.results[i].isFinal) {
+                                fullTranscript += transcript + ' ';
+                            } else {
+                                interimTranscript += transcript;
+                            }
+                        }
+                        
+                        this.elements.transcriptionResult.innerHTML = `
+                            <p><strong>Transcrição:</strong></p>
+                            <p>${fullTranscript}</p>
+                            <p class="text-muted">${interimTranscript}</p>
+                        `;
+                    };
+                    
+                    recognition.onerror = (event) => {
+                        console.error("Erro no reconhecimento:", event.error);
+                        this.updateUI("Erro na transcrição", 0, true);
+                        this.isProcessing = false;
+                    };
+                    
+                    recognition.onend = () => {
+                        this.updateUI("Transcrição concluída!", 100);
+                        this.isProcessing = false;
+                    };
+                    
+                    recognition.start();
+                    audio.play();
+                    
+                } catch (error) {
+                    console.error("Erro na transcrição:", error);
+                    this.updateUI("Falha na transcrição: " + error.message, 0, true);
+                    this.isProcessing = false;
+                }
+            }
+            
+            updateUI(message, progress, isError = false) {
+                this.elements.progressText.textContent = message;
+                this.elements.progressBar.style.width = `${progress}%`;
+                
+                if (isError) {
+                    this.elements.transcriptionResult.innerHTML = `<p class="text-danger">${message}</p>`;
+                }
+            }
+            
+            readFileAsArrayBuffer(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsArrayBuffer(file);
+                });
+            }
+        }
+        
+        // Inicializa o viLorLM
+        document.addEventListener('DOMContentLoaded', () => {
+            new viLorLM();
+        });
+    </script>
+</body>
+</html>
