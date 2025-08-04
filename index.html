@@ -3,343 +3,778 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>viLorLM - Transcrição de Vídeo/Áudio</title>
-    <!-- CDNs para processamento -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@latest"></script>
-    <script src="https://cdn.jsdelivr.net/npm/recordrtc@latest"></script>
-    <!-- FFmpeg para extrair áudio de vídeos -->
-    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
-    <!-- UI Framework -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Transcrição Profissional</title>
+    <!-- CDNs otimizadas -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet" crossorigin="anonymous">
     <style>
         :root {
-            --main-purple: #7B2CBF;
-            --main-pink: #E83F6F;
+            --primary-color: #4361ee;
+            --secondary-color: #3f37c9;
+            --danger-color: #f72585;
         }
         body {
-            background: #f8f9fa;
-            min-height: 100vh;
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', system-ui, sans-serif;
         }
-        .vilorlm-container {
-            max-width: 900px;
-            margin: 2rem auto;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(123, 44, 191, 0.2);
+        .card {
+            border-radius: 12px;
+            border: none;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+        }
+        .card-header {
+            border-radius: 12px 12px 0 0 !important;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+        }
+        #waveform {
+            height: 120px;
+            background: #f0f3ff;
+            border-radius: 8px;
+            position: relative;
             overflow: hidden;
         }
-        .vilorlm-header {
-            background: linear-gradient(135deg, var(--main-purple), var(--main-pink));
-            color: white;
-            padding: 1.5rem;
-            text-align: center;
+        .wave-bar {
+            position: absolute;
+            bottom: 0;
+            width: 4px;
+            background: var(--primary-color);
+            border-radius: 2px 2px 0 0;
+            transition: height 0.1s ease;
         }
-        .transcription-panel {
-            padding: 1.5rem;
-            background: white;
-        }
-        .btn-vilorlm {
-            background: linear-gradient(135deg, var(--main-purple), var(--main-pink));
-            color: white;
-            border: none;
-            padding: 10px 25px;
-            border-radius: 50px;
-            font-weight: 600;
-        }
-        .progress-bar {
-            background: linear-gradient(135deg, var(--main-purple), var(--main-pink));
-        }
-        .file-upload-box {
-            border: 2px dashed #ddd;
-            border-radius: 15px;
-            padding: 2rem;
-            text-align: center;
-            margin-bottom: 1rem;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        .file-upload-box:hover {
-            border-color: var(--main-purple);
-            background: rgba(123, 44, 191, 0.05);
+        #progressBar {
+            height: 6px;
+            background: linear-gradient(90deg, var(--primary-color), #4cc9f0);
+            border-radius: 3px;
+            transition: width 0.2s linear;
         }
         #transcriptionResult {
-            min-height: 200px;
-            border: 1px solid #eee;
-            border-radius: 10px;
-            padding: 1rem;
+            min-height: 300px;
+            max-height: 500px;
+            overflow-y: auto;
             background: white;
+            border-radius: 8px;
+            padding: 16px;
+            border: 1px solid #e0e0e0;
+        }
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        .btn-danger {
+            background-color: var(--danger-color);
+            border-color: var(--danger-color);
+        }
+        .status-badge {
+            font-size: 0.8rem;
+            padding: 4px 8px;
+            border-radius: 12px;
+        }
+        @media (max-width: 768px) {
+            #transcriptionResult {
+                min-height: 200px;
+                max-height: 300px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="vilorlm-container">
-        <div class="vilorlm-header">
-            <h2>viLorLM</h2>
-            <p class="mb-0">Transcrição de Vídeo/Áudio em ≤5 Minutos</p>
-        </div>
-        
-        <div class="transcription-panel">
-            <div class="file-upload-box" id="fileUploadBox">
-                <i class="bi bi-cloud-arrow-up" style="font-size: 2rem; color: var(--main-purple);"></i>
-                <p class="mt-2">Arraste e solte arquivos de vídeo/áudio aqui</p>
-                <small class="text-muted">Formatos suportados: MP3, MP4, WAV, AVI (até 6 horas)</small>
-                <input type="file" id="fileInput" accept="audio/*,video/*" hidden>
-            </div>
-            
-            <div class="d-flex gap-2 mb-3">
-                <button id="recordBtn" class="btn btn-vilorlm flex-grow-1">
-                    <i class="bi bi-mic-fill"></i> Gravar Áudio
-                </button>
-                <button id="stopBtn" class="btn btn-outline-secondary" disabled>
-                    <i class="bi bi-stop-fill"></i> Parar
-                </button>
-            </div>
-            
-            <div class="mb-3">
-                <div class="d-flex justify-content-between mb-1">
-                    <small>Progresso:</small>
-                    <small id="progressText">0%</small>
+    <div class="container py-4">
+        <div class="row justify-content-center">
+            <div class="col-lg-10">
+                <div class="card shadow-lg">
+                    <div class="card-header text-white">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h3 class="mb-0"><i class="fas fa-file-alt me-2"></i>Transcrição Profissional</h3>
+                            <span id="statusBadge" class="status-badge bg-secondary">Pronto</span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-4">
+                                    <label for="fileInput" class="form-label fw-bold">
+                                        <i class="fas fa-file-upload me-2"></i>Selecione seu arquivo
+                                    </label>
+                                    <input type="file" id="fileInput" class="form-control" accept="audio/*,video/*">
+                                    <div class="form-text text-muted">Suporta até 6h de áudio ou 3h de vídeo (MP3, WAV, MP4, etc.)</div>
+                                </div>
+                                
+                                <div id="fileInfo" class="mb-4 d-none">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <h5><i class="fas fa-info-circle me-2"></i>Detalhes do Arquivo</h5>
+                                        <button id="cancelFileBtn" class="btn btn-sm btn-outline-danger">
+                                            <i class="fas fa-times me-1"></i>Cancelar
+                                        </button>
+                                    </div>
+                                    <div id="fileDetails" class="card bg-light p-3"></div>
+                                </div>
+                                
+                                <div id="controls" class="mb-4 d-none">
+                                    <div class="d-flex gap-2 mb-3">
+                                        <button id="playPauseBtn" class="btn btn-primary flex-grow-1">
+                                            <i class="fas fa-play me-2"></i>Reproduzir
+                                        </button>
+                                        <button id="transcribeBtn" class="btn btn-success flex-grow-1">
+                                            <i class="fas fa-microphone me-2"></i>Transcrever
+                                        </button>
+                                    </div>
+                                    
+                                    <div class="d-flex align-items-center gap-3">
+                                        <button id="skipBackBtn" class="btn btn-outline-secondary">
+                                            <i class="fas fa-step-backward"></i>
+                                        </button>
+                                        <input type="range" id="volumeControl" class="form-range" min="0" max="1" step="0.01" value="0.7">
+                                        <button id="skipForwardBtn" class="btn btn-outline-secondary">
+                                            <i class="fas fa-step-forward"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="col-md-6">
+                                <div id="waveform" class="mb-3">
+                                    <div id="progressIndicator" style="position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: rgba(0,0,0,0.1); z-index: 1;"></div>
+                                </div>
+                                
+                                <div id="progressContainer" class="mb-3">
+                                    <div id="progressBar"></div>
+                                    <div class="d-flex justify-content-between mt-2">
+                                        <small id="currentTime" class="text-muted">00:00:00</small>
+                                        <small id="duration" class="text-muted">00:00:00</small>
+                                    </div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <label class="form-label fw-bold m-0">
+                                            <i class="fas fa-scroll me-2"></i>Transcrição
+                                        </label>
+                                        <div>
+                                            <button id="copyBtn" class="btn btn-sm btn-outline-primary me-1" title="Copiar">
+                                                <i class="fas fa-copy"></i>
+                                            </button>
+                                            <button id="saveBtn" class="btn btn-sm btn-outline-success me-1" title="Salvar">
+                                                <i class="fas fa-save"></i>
+                                            </button>
+                                            <button id="clearBtn" class="btn btn-sm btn-outline-danger" title="Limpar">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div id="transcriptionResult"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="progress" style="height: 8px;">
-                    <div id="progressBar" class="progress-bar" style="width: 0%"></div>
+                
+                <div class="mt-3 text-center text-muted small">
+                    <p>Esta ferramenta processa arquivos diretamente no seu navegador. Nenhum dado é enviado para servidores externos.</p>
+                    <p id="performanceInfo">Desempenho: calculando...</p>
                 </div>
-            </div>
-            
-            <div id="transcriptionResult" class="mb-3">
-                <p class="text-muted text-center my-4">A transcrição aparecerá aqui...</p>
             </div>
         </div>
     </div>
 
+    <!-- CDNs com fallback -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ffmpeg.js/4.2.9003/ffmpeg.min.js"></script>
+    
     <script>
-        // ===== viLorLM - Transcrição Client-Side =====
-        class viLorLM {
-            constructor() {
-                this.recorder = null;
-                this.audioChunks = [];
-                this.ffmpeg = null;
-                this.isProcessing = false;
-                
-                this.initElements();
-                this.initEventListeners();
-                this.loadFFmpeg();
+        document.addEventListener('DOMContentLoaded', () => {
+            // Elementos da UI
+            const fileInput = document.getElementById('fileInput');
+            const fileInfo = document.getElementById('fileInfo');
+            const fileDetails = document.getElementById('fileDetails');
+            const cancelFileBtn = document.getElementById('cancelFileBtn');
+            const controls = document.getElementById('controls');
+            const playPauseBtn = document.getElementById('playPauseBtn');
+            const transcribeBtn = document.getElementById('transcribeBtn');
+            const skipBackBtn = document.getElementById('skipBackBtn');
+            const skipForwardBtn = document.getElementById('skipForwardBtn');
+            const volumeControl = document.getElementById('volumeControl');
+            const waveform = document.getElementById('waveform');
+            const progressIndicator = document.getElementById('progressIndicator');
+            const progressBar = document.getElementById('progressBar');
+            const progressContainer = document.getElementById('progressContainer');
+            const currentTime = document.getElementById('currentTime');
+            const duration = document.getElementById('duration');
+            const transcriptionResult = document.getElementById('transcriptionResult');
+            const copyBtn = document.getElementById('copyBtn');
+            const saveBtn = document.getElementById('saveBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            const statusBadge = document.getElementById('statusBadge');
+            const performanceInfo = document.getElementById('performanceInfo');
+            
+            // Variáveis de estado
+            let audioContext;
+            let mediaElementSource;
+            let analyser;
+            let audioElement;
+            let recognition;
+            let isPlaying = false;
+            let isTranscribing = false;
+            let chunks = [];
+            let transcriptionStartTime;
+            let performanceMonitorInterval;
+            let memoryUsage = 0;
+            let cpuUsage = 0;
+            
+            // Verificar suporte do navegador
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                showError('Seu navegador não suporta reconhecimento de voz. Recomendamos usar Chrome ou Edge para melhor desempenho.');
+                fileInput.disabled = true;
+                return;
             }
             
-            initElements() {
-                this.elements = {
-                    fileInput: document.getElementById('fileInput'),
-                    fileUploadBox: document.getElementById('fileUploadBox'),
-                    recordBtn: document.getElementById('recordBtn'),
-                    stopBtn: document.getElementById('stopBtn'),
-                    progressText: document.getElementById('progressText'),
-                    progressBar: document.getElementById('progressBar'),
-                    transcriptionResult: document.getElementById('transcriptionResult')
-                };
-            }
+            // Configurar monitoramento de desempenho
+            startPerformanceMonitoring();
             
-            initEventListeners() {
-                this.elements.fileUploadBox.addEventListener('click', () => this.elements.fileInput.click());
-                this.elements.fileInput.addEventListener('change', (e) => this.processFile(e.target.files[0]));
-                this.elements.recordBtn.addEventListener('click', () => this.startRecording());
-                this.elements.stopBtn.addEventListener('click', () => this.stopRecording());
-                
-                // Drag and drop
-                this.elements.fileUploadBox.addEventListener('dragover', (e) => {
-                    e.preventDefault();
-                    this.elements.fileUploadBox.style.borderColor = 'var(--main-purple)';
-                    this.elements.fileUploadBox.style.backgroundColor = 'rgba(123, 44, 191, 0.1)';
-                });
-                
-                this.elements.fileUploadBox.addEventListener('dragleave', () => {
-                    this.elements.fileUploadBox.style.borderColor = '#ddd';
-                    this.elements.fileUploadBox.style.backgroundColor = '';
-                });
-                
-                this.elements.fileUploadBox.addEventListener('drop', (e) => {
-                    e.preventDefault();
-                    this.elements.fileUploadBox.style.borderColor = '#ddd';
-                    this.elements.fileUploadBox.style.backgroundColor = '';
-                    if (e.dataTransfer.files.length) {
-                        this.processFile(e.dataTransfer.files[0]);
-                    }
-                });
-            }
+            // Configurar reconhecimento de voz
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'pt-BR';
+            recognition.maxAlternatives = 3;
             
-            async loadFFmpeg() {
-                try {
-                    this.updateUI("Carregando FFmpeg...", 10);
-                    const { createFFmpeg } = FFmpeg;
-                    this.ffmpeg = createFFmpeg({ log: true });
-                    await this.ffmpeg.load();
-                    this.updateUI("FFmpeg carregado!", 20);
-                } catch (error) {
-                    console.error("Erro ao carregar FFmpeg:", error);
-                    this.updateUI("Erro ao carregar FFmpeg", 0, true);
-                }
-            }
+            // Event listeners
+            fileInput.addEventListener('change', handleFileSelect);
+            cancelFileBtn.addEventListener('click', resetUI);
+            playPauseBtn.addEventListener('click', togglePlayPause);
+            transcribeBtn.addEventListener('click', toggleTranscription);
+            skipBackBtn.addEventListener('click', () => seek(-15));
+            skipForwardBtn.addEventListener('click', () => seek(15));
+            volumeControl.addEventListener('input', adjustVolume);
+            copyBtn.addEventListener('click', copyTranscription);
+            saveBtn.addEventListener('click', saveTranscription);
+            clearBtn.addEventListener('click', clearTranscription);
             
-            async startRecording() {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    this.recorder = new RecordRTC(stream, {
-                        type: 'audio',
-                        mimeType: 'audio/wav',
-                        recorderType: RecordRTC.StereoAudioRecorder,
-                        desiredSampRate: 16000,
-                        timeSlice: 1000, // Processa em pedaços de 1 segundo
-                        ondataavailable: (blob) => this.processAudioChunk(blob)
-                    });
-                    
-                    this.recorder.startRecording();
-                    this.elements.recordBtn.disabled = true;
-                    this.elements.stopBtn.disabled = false;
-                    
-                    this.updateUI("Gravando... fale agora", 30);
-                } catch (error) {
-                    console.error("Erro ao iniciar gravação:", error);
-                    this.updateUI("Erro ao acessar microfone", 0, true);
-                }
-            }
+            // Configurar arrastar e soltar
+            setupDragAndDrop();
             
-            async stopRecording() {
-                if (!this.recorder) return;
-                
-                this.recorder.stopRecording(() => {
-                    const blob = this.recorder.getBlob();
-                    this.processAudio(blob, "Áudio gravado");
-                    
-                    this.elements.recordBtn.disabled = false;
-                    this.elements.stopBtn.disabled = true;
-                });
-            }
-            
-            async processFile(file) {
+            // Função principal para lidar com seleção de arquivos
+            async function handleFileSelect(event) {
+                const file = event.target.files[0];
                 if (!file) return;
                 
-                this.updateUI(`Processando ${file.name}...`, 20);
+                // Verificar tamanho do arquivo (limite de 2GB)
+                if (file.size > 2 * 1024 * 1024 * 1024) {
+                    showError('Arquivo muito grande. O limite é de 2GB.');
+                    return;
+                }
                 
-                if (file.type.startsWith('audio/')) {
-                    this.processAudio(file, file.name);
-                } 
-                else if (file.type.startsWith('video/')) {
-                    this.processVideo(file);
-                } 
-                else {
-                    this.updateUI("Formato não suportado", 0, true);
-                }
-            }
-            
-            async processVideo(videoFile) {
+                resetUI();
+                updateStatus('Processando arquivo...', 'info');
+                
                 try {
-                    if (!this.ffmpeg) {
-                        throw new Error("FFmpeg não carregado");
-                    }
+                    // Criar URL do objeto para o arquivo
+                    const fileURL = URL.createObjectURL(file);
                     
-                    this.updateUI("Extraindo áudio do vídeo...", 40);
+                    // Criar elemento de áudio
+                    audioElement = new Audio(fileURL);
                     
-                    // Converte vídeo para áudio usando FFmpeg
-                    const data = await this.readFileAsArrayBuffer(videoFile);
-                    this.ffmpeg.FS('writeFile', 'input.mp4', new Uint8Array(data));
+                    // Configurar eventos do áudio
+                    audioElement.addEventListener('loadedmetadata', () => {
+                        displayFileInfo(file);
+                        setupAudioContext();
+                        setupWaveform();
+                        controls.classList.remove('d-none');
+                        updateStatus('Pronto para reproduzir', 'success');
+                    });
                     
-                    await this.ffmpeg.run(
-                        '-i', 'input.mp4',
-                        '-vn',          // Remove vídeo
-                        '-acodec', 'pcm_s16le', // Codec de áudio
-                        '-ar', '16000', // Taxa de amostragem
-                        '-ac', '1',     // Mono
-                        'output.wav'
-                    );
+                    audioElement.addEventListener('error', (e) => {
+                        console.error('Erro no elemento de áudio:', e);
+                        showError('Formato de arquivo não suportado ou corrompido.');
+                        resetUI();
+                    });
                     
-                    const audioData = this.ffmpeg.FS('readFile', 'output.wav');
-                    const audioBlob = new Blob([audioData.buffer], { type: 'audio/wav' });
-                    
-                    this.processAudio(audioBlob, videoFile.name);
-                } catch (error) {
-                    console.error("Erro no processamento de vídeo:", error);
-                    this.updateUI("Falha ao extrair áudio do vídeo", 0, true);
-                }
-            }
-            
-            async processAudio(audioBlob, sourceName) {
-                try {
-                    this.isProcessing = true;
-                    this.updateUI(`Transcrevendo ${sourceName}...`, 60);
-                    
-                    if (!('webkitSpeechRecognition' in window)) {
-                        throw new Error("API de reconhecimento não suportada no seu navegador");
-                    }
-                    
-                    const recognition = new webkitSpeechRecognition();
-                    recognition.continuous = true;
-                    recognition.interimResults = true;
-                    recognition.lang = 'pt-BR';
-                    
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    const audio = new Audio(audioUrl);
-                    
-                    let fullTranscript = "";
-                    
-                    recognition.onresult = (event) => {
-                        let interimTranscript = '';
-                        for (let i = event.resultIndex; i < event.results.length; i++) {
-                            const transcript = event.results[i][0].transcript;
-                            if (event.results[i].isFinal) {
-                                fullTranscript += transcript + ' ';
-                            } else {
-                                interimTranscript += transcript;
-                            }
-                        }
-                        
-                        this.elements.transcriptionResult.innerHTML = `
-                            <p><strong>Transcrição:</strong></p>
-                            <p>${fullTranscript}</p>
-                            <p class="text-muted">${interimTranscript}</p>
-                        `;
-                    };
-                    
-                    recognition.onerror = (event) => {
-                        console.error("Erro no reconhecimento:", event.error);
-                        this.updateUI("Erro na transcrição", 0, true);
-                        this.isProcessing = false;
-                    };
-                    
-                    recognition.onend = () => {
-                        this.updateUI("Transcrição concluída!", 100);
-                        this.isProcessing = false;
-                    };
-                    
-                    recognition.start();
-                    audio.play();
+                    audioElement.addEventListener('ended', () => {
+                        isPlaying = false;
+                        updatePlayPauseButton();
+                    });
                     
                 } catch (error) {
-                    console.error("Erro na transcrição:", error);
-                    this.updateUI("Falha na transcrição: " + error.message, 0, true);
-                    this.isProcessing = false;
+                    console.error('Erro ao processar arquivo:', error);
+                    showError('Erro ao processar o arquivo. Tente outro formato.');
+                    resetUI();
                 }
             }
             
-            updateUI(message, progress, isError = false) {
-                this.elements.progressText.textContent = message;
-                this.elements.progressBar.style.width = `${progress}%`;
+            // Exibir informações do arquivo
+            function displayFileInfo(file) {
+                fileInfo.classList.remove('d-none');
                 
-                if (isError) {
-                    this.elements.transcriptionResult.innerHTML = `<p class="text-danger">${message}</p>`;
+                const fileType = file.type.split('/')[0];
+                const fileSize = formatFileSize(file.size);
+                const fileExtension = file.name.split('.').pop().toUpperCase();
+                
+                fileDetails.innerHTML = `
+                    <div class="row">
+                        <div class="col-6">
+                            <p><strong><i class="fas fa-file me-2"></i>Nome:</strong></p>
+                            <p class="text-truncate">${file.name}</p>
+                        </div>
+                        <div class="col-6">
+                            <p><strong><i class="fas fa-tag me-2"></i>Tipo:</strong></p>
+                            <p>${fileType} (${fileExtension})</p>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-6">
+                            <p><strong><i class="fas fa-weight me-2"></i>Tamanho:</strong></p>
+                            <p>${fileSize}</p>
+                        </div>
+                        <div class="col-6">
+                            <p><strong><i class="fas fa-clock me-2"></i>Duração:</strong></p>
+                            <p id="fileDuration">${formatTime(audioElement.duration)}</p>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Configurar AudioContext e analisador
+            function setupAudioContext() {
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        latencyHint: 'interactive',
+                        sampleRate: 16000
+                    });
+                    
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 256;
+                    
+                    mediaElementSource = audioContext.createMediaElementSource(audioElement);
+                    mediaElementSource.connect(analyser);
+                    analyser.connect(audioContext.destination);
+                    
+                    // Configurar volume inicial
+                    audioElement.volume = volumeControl.value;
+                } catch (error) {
+                    console.error('Erro ao configurar AudioContext:', error);
+                    showError('Erro no processamento de áudio. Tente outro navegador.');
                 }
             }
             
-            readFileAsArrayBuffer(file) {
-                return new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = () => resolve(reader.result);
-                    reader.onerror = reject;
-                    reader.readAsArrayBuffer(file);
+            // Configurar visualização de onda
+            function setupWaveform() {
+                waveform.innerHTML = '';
+                const width = waveform.clientWidth;
+                const barCount = Math.floor(width / 6);
+                
+                for (let i = 0; i < barCount; i++) {
+                    const bar = document.createElement('div');
+                    bar.className = 'wave-bar';
+                    bar.style.left = `${(i / barCount) * 100}%`;
+                    bar.style.height = '2px';
+                    bar.dataset.index = i;
+                    waveform.appendChild(bar);
+                }
+                
+                visualizeWaveform();
+            }
+            
+            // Animar visualização de onda
+            function visualizeWaveform() {
+                if (!analyser || !isPlaying) return;
+                
+                requestAnimationFrame(visualizeWaveform);
+                
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                analyser.getByteFrequencyData(dataArray);
+                
+                const bars = document.querySelectorAll('.wave-bar');
+                const step = Math.floor(bufferLength / bars.length);
+                
+                bars.forEach((bar, i) => {
+                    const value = dataArray[i * step] / 255;
+                    const height = value * 100;
+                    bar.style.height = `${height}px`;
+                    bar.style.opacity = 0.2 + (value * 0.8);
                 });
             }
-        }
-        
-        // Inicializa o viLorLM
-        document.addEventListener('DOMContentLoaded', () => {
-            new viLorLM();
+            
+            // Controlar reprodução
+            function togglePlayPause() {
+                if (!audioElement) return;
+                
+                if (isPlaying) {
+                    audioElement.pause();
+                } else {
+                    // Retomar o contexto de áudio se estiver suspenso
+                    if (audioContext.state === 'suspended') {
+                        audioContext.resume();
+                    }
+                    audioElement.play()
+                        .then(() => {
+                            visualizeWaveform();
+                        })
+                        .catch(error => {
+                            console.error('Erro ao reproduzir:', error);
+                            showError('Erro ao reproduzir. Verifique as permissões de áudio.');
+                        });
+                }
+                
+                isPlaying = !isPlaying;
+                updatePlayPauseButton();
+            }
+            
+            // Atualizar botão play/pause
+            function updatePlayPauseButton() {
+                if (isPlaying) {
+                    playPauseBtn.innerHTML = '<i class="fas fa-pause me-2"></i>Pausar';
+                    playPauseBtn.classList.remove('btn-primary');
+                    playPauseBtn.classList.add('btn-warning');
+                } else {
+                    playPauseBtn.innerHTML = '<i class="fas fa-play me-2"></i>Reproduzir';
+                    playPauseBtn.classList.remove('btn-warning');
+                    playPauseBtn.classList.add('btn-primary');
+                }
+            }
+            
+            // Controlar transcrição
+            function toggleTranscription() {
+                if (isTranscribing) {
+                    stopTranscription();
+                } else {
+                    startTranscription();
+                }
+            }
+            
+            // Iniciar transcrição
+            function startTranscription() {
+                if (!audioElement || isTranscribing) return;
+                
+                isTranscribing = true;
+                transcriptionStartTime = Date.now();
+                updateStatus('Transcrevendo...', 'primary');
+                transcribeBtn.innerHTML = '<i class="fas fa-stop me-2"></i>Parar';
+                transcribeBtn.classList.remove('btn-success');
+                transcribeBtn.classList.add('btn-danger');
+                
+                // Configurar eventos do reconhecimento
+                recognition.onresult = (event) => {
+                    const newChunks = [];
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const result = event.results[i];
+                        if (result.isFinal) {
+                            newChunks.push({
+                                text: result[0].transcript,
+                                confidence: result[0].confidence,
+                                timestamp: audioElement.currentTime
+                            });
+                        }
+                    }
+                    
+                    if (newChunks.length > 0) {
+                        chunks = chunks.concat(newChunks);
+                        updateTranscriptionDisplay();
+                    }
+                };
+                
+                recognition.onerror = (event) => {
+                    console.error('Erro no reconhecimento:', event.error);
+                    showError(`Erro na transcrição: ${getErrorDescription(event.error)}`);
+                    stopTranscription();
+                };
+                
+                recognition.onend = () => {
+                    if (isTranscribing) {
+                        recognition.start();
+                    }
+                };
+                
+                // Iniciar reconhecimento
+                recognition.start();
+                
+                // Atualizar progresso
+                audioElement.addEventListener('timeupdate', updateProgress);
+                
+                // Se não estiver reproduzindo, comece a reproduzir
+                if (!isPlaying) {
+                    togglePlayPause();
+                }
+            }
+            
+            // Parar transcrição
+            function stopTranscription() {
+                if (!isTranscribing) return;
+                
+                isTranscribing = false;
+                recognition.stop();
+                updateStatus('Transcrição concluída', 'success');
+                transcribeBtn.innerHTML = '<i class="fas fa-microphone me-2"></i>Transcrever';
+                transcribeBtn.classList.remove('btn-danger');
+                transcribeBtn.classList.add('btn-success');
+                
+                // Calcular estatísticas
+                const transcriptionTime = (Date.now() - transcriptionStartTime) / 1000;
+                const audioDuration = audioElement.duration;
+                const speedRatio = audioDuration / transcriptionTime;
+                
+                performanceInfo.innerHTML = `
+                    Transcrição concluída em ${formatTime(transcriptionTime)} (${speedRatio.toFixed(1)}× mais rápido que o tempo real)
+                `;
+            }
+            
+            // Atualizar exibição da transcrição
+            function updateTranscriptionDisplay() {
+                transcriptionResult.innerHTML = '';
+                
+                chunks.forEach((chunk, index) => {
+                    const chunkElement = document.createElement('div');
+                    chunkElement.className = 'mb-2';
+                    chunkElement.innerHTML = `
+                        <div class="d-flex justify-content-between small text-muted mb-1">
+                            <span>${formatTime(chunk.timestamp)}</span>
+                            <span>${Math.round(chunk.confidence * 100)}% de precisão</span>
+                        </div>
+                        <p class="mb-0">${chunk.text}</p>
+                        ${index < chunks.length - 1 ? '<hr class="my-2">' : ''}
+                    `;
+                    transcriptionResult.appendChild(chunkElement);
+                });
+                
+                transcriptionResult.scrollTop = transcriptionResult.scrollHeight;
+            }
+            
+            // Atualizar barra de progresso
+            function updateProgress() {
+                if (!audioElement) return;
+                
+                const progress = (audioElement.currentTime / audioElement.duration) * 100;
+                progressBar.style.width = `${progress}%`;
+                progressIndicator.style.width = `${progress}%`;
+                currentTime.textContent = formatTime(audioElement.currentTime);
+                
+                // Atualizar duração se necessário (pode mudar para alguns formatos)
+                duration.textContent = formatTime(audioElement.duration);
+                
+                // Parar transcrição se o áudio terminar
+                if (progress >= 100 && isTranscribing) {
+                    stopTranscription();
+                }
+            }
+            
+            // Ajustar volume
+            function adjustVolume() {
+                if (audioElement) {
+                    audioElement.volume = volumeControl.value;
+                }
+            }
+            
+            // Avançar/retroceder
+            function seek(seconds) {
+                if (!audioElement) return;
+                
+                let newTime = audioElement.currentTime + seconds;
+                newTime = Math.max(0, Math.min(newTime, audioElement.duration));
+                audioElement.currentTime = newTime;
+            }
+            
+            // Copiar transcrição
+            function copyTranscription() {
+                const text = chunks.map(chunk => `[${formatTime(chunk.timestamp)}] ${chunk.text}`).join('\n\n');
+                
+                navigator.clipboard.writeText(text)
+                    .then(() => {
+                        const originalText = copyBtn.innerHTML;
+                        copyBtn.innerHTML = '<i class="fas fa-check"></i>';
+                        setTimeout(() => {
+                            copyBtn.innerHTML = originalText;
+                        }, 2000);
+                    })
+                    .catch(err => {
+                        console.error('Erro ao copiar:', err);
+                    });
+            }
+            
+            // Salvar transcrição
+            function saveTranscription() {
+                const text = chunks.map(chunk => `[${formatTime(chunk.timestamp)}] ${chunk.text}`).join('\n\n');
+                const blob = new Blob([text], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                
+                a.href = url;
+                a.download = 'transcricao.txt';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+            
+            // Limpar transcrição
+            function clearTranscription() {
+                if (chunks.length === 0) return;
+                
+                if (confirm('Tem certeza que deseja limpar toda a transcrição?')) {
+                    chunks = [];
+                    transcriptionResult.innerHTML = '<p class="text-muted">Nenhuma transcrição disponível.</p>';
+                }
+            }
+            
+            // Configurar arrastar e soltar
+            function setupDragAndDrop() {
+                const card = document.querySelector('.card');
+                
+                card.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    card.classList.add('border-primary');
+                });
+                
+                card.addEventListener('dragleave', () => {
+                    card.classList.remove('border-primary');
+                });
+                
+                card.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    card.classList.remove('border-primary');
+                    
+                    if (e.dataTransfer.files.length) {
+                        fileInput.files = e.dataTransfer.files;
+                        handleFileSelect({ target: fileInput });
+                    }
+                });
+            }
+            
+            // Monitorar desempenho
+            function startPerformanceMonitoring() {
+                let lastTime = performance.now();
+                let lastUsedJSHeapSize = performance.memory?.usedJSHeapSize || 0;
+                
+                performanceMonitorInterval = setInterval(() => {
+                    const now = performance.now();
+                    const timeDiff = now - lastTime;
+                    lastTime = now;
+                    
+                    // Calcular uso aproximado da CPU
+                    const startMeasure = performance.now();
+                    setTimeout(() => {
+                        const endMeasure = performance.now();
+                        const duration = endMeasure - startMeasure;
+                        cpuUsage = Math.min(100, Math.max(0, 100 - (duration / 10)));
+                    }, 0);
+                    
+                    // Calcular uso de memória (se suportado)
+                    if (performance.memory) {
+                        memoryUsage = performance.memory.usedJSHeapSize / (1024 * 1024);
+                        const memoryDiff = performance.memory.usedJSHeapSize - lastUsedJSHeapSize;
+                        lastUsedJSHeapSize = performance.memory.usedJSHeapSize;
+                    }
+                    
+                    // Atualizar informações de desempenho
+                    updatePerformanceInfo();
+                }, 2000);
+            }
+            
+            function updatePerformanceInfo() {
+                let info = '';
+                
+                if (performance.memory) {
+                    info += `Memória: ${memoryUsage.toFixed(1)}MB | `;
+                }
+                
+                info += `CPU: ~${Math.round(cpuUsage)}%`;
+                
+                if (isTranscribing) {
+                    const elapsed = (Date.now() - transcriptionStartTime) / 1000;
+                    const audioProcessed = audioElement.currentTime;
+                    const speedRatio = audioProcessed / elapsed;
+                    info += ` | Velocidade: ${speedRatio.toFixed(1)}×`;
+                }
+                
+                performanceInfo.textContent = info;
+            }
+            
+            // Funções auxiliares
+            function formatTime(seconds) {
+                if (isNaN(seconds)) return '00:00:00';
+                
+                const hrs = Math.floor(seconds / 3600);
+                const mins = Math.floor((seconds % 3600) / 60);
+                const secs = Math.floor(seconds % 60);
+                
+                return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+            
+            function formatFileSize(bytes) {
+                if (bytes < 1024) return `${bytes} B`;
+                if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+                if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+                return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+            }
+            
+            function getErrorDescription(errorCode) {
+                const errors = {
+                    'no-speech': 'Nenhuma fala detectada',
+                    'audio-capture': 'Erro na captura de áudio',
+                    'not-allowed': 'Permissão negada',
+                    'aborted': 'Reconhecimento abortado',
+                    'network': 'Erro de rede',
+                    'language-not-supported': 'Idioma não suportado'
+                };
+                return errors[errorCode] || `Erro desconhecido (${errorCode})`;
+            }
+            
+            function updateStatus(message, type) {
+                statusBadge.textContent = message;
+                statusBadge.className = `status-badge bg-${type}`;
+            }
+            
+            function showError(message) {
+                updateStatus('Erro', 'danger');
+                const alert = document.createElement('div');
+                alert.className = 'alert alert-danger alert-dismissible fade show';
+                alert.innerHTML = `
+                    ${message}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                `;
+                transcriptionResult.prepend(alert);
+            }
+            
+            function resetUI() {
+                // Parar reprodução e transcrição
+                if (isPlaying) togglePlayPause();
+                if (isTranscribing) stopTranscription();
+                
+                // Limpar estado
+                if (audioElement) {
+                    audioElement.pause();
+                    audioElement.removeAttribute('src');
+                    audioElement.load();
+                }
+                
+                if (audioContext) {
+                    audioContext.close();
+                }
+                
+                // Limpar interface
+                fileInput.value = '';
+                fileInfo.classList.add('d-none');
+                controls.classList.add('d-none');
+                waveform.innerHTML = '';
+                progressBar.style.width = '0%';
+                progressIndicator.style.width = '0%';
+                currentTime.textContent = '00:00:00';
+                duration.textContent = '00:00:00';
+                transcriptionResult.innerHTML = '<p class="text-muted">Nenhuma transcrição disponível.</p>';
+                chunks = [];
+                
+                // Liberar recursos
+                if (audioElement && audioElement.src) {
+                    URL.revokeObjectURL(audioElement.src);
+                }
+                
+                updateStatus('Pronto', 'secondary');
+            }
+            
+            // Limpar ao sair
+            window.addEventListener('beforeunload', () => {
+                clearInterval(performanceMonitorInterval);
+                resetUI();
+            });
         });
     </script>
 </body>
